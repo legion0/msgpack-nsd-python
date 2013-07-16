@@ -11,18 +11,23 @@ class NSDServer():
 		self._stop_event = threading.Event()
 		self._service_lock = threading.Lock()
 
-	def add_service(self, name, port, features=None):
+	def add_service(self, name, port, extra_info=None, features=()):
+		response = {"service": name, "port": port}
+		if extra_info:
+			response["extra_info"] = extra_info
+		service = {"name": name, "response": response, "features": features}
 		with self._service_lock:
-			self.services[name] = {"features": features, "port": port}
+			self.services[name] = service
 
 	def start(self):
-		ip_addresses = socket.gethostbyname_ex('')[2]
-		ip_address = ip_addresses[0]
-		ip_address = "" # XXX
-
-		thread = threading.Thread(target=self._listening_thread, args=(ip_address,))
-		self._threads.append(thread)
-		thread.start()
+		if sys.platform == "win32":
+			ip_addresses = socket.gethostbyname_ex('')[2]
+		else:
+			ip_addresses = [""]
+		for ip_address in ip_addresses:
+			thread = threading.Thread(target=self._listening_thread, args=(ip_address,))
+			self._threads.append(thread)
+			thread.start()
 
 	def stop(self):
 		print "shutdown signal received"
@@ -59,8 +64,12 @@ class NSDServer():
 			print 'received %s bytes from %s' % (len(data), address)
 			msg = msgpack.unpackb(data)
 			service_name = msg["service"]
+			required_features = msg.get("features", [])
 			with self._service_lock:
 				service = self.services.get(service_name)
 			if service:
-				print 'sending discovery response to', address
-				sock.sendto(msgpack.packb({"service": "GM", "port": service["port"]}), address)
+				has_features = len(set(service["features"]) - set(required_features)) == 0
+				if has_features:
+					print 'sending discovery response to', address
+					print service["response"]
+					sock.sendto(msgpack.packb(service["response"]), address)
